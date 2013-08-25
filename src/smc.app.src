@@ -1,0 +1,8 @@
+{application, smc,
+ [{description, "SMC apple system managment controller"},
+  {vsn, "1.0"},
+  {mod, {smc_app, []}},
+  {registered, [smc_srv,smc_port]},
+  {env, []},
+  {applications,[kernel,stdlib]}
+  ]}.
