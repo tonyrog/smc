@@ -14,22 +14,24 @@
 -type int16()  :: -32768 .. 32767.
 -type uint8() :: 0..255.
 -type posix() :: atom().
--type flag()  :: uint8().
+-type flag_t()  :: uint8().
+-type pwm_t() :: uint16().
+
+-type scale_mode() :: scale_als |   %% Use ALS autoscale
+		      scale_tod |   %% Use TOD autoscale
+		      scale_const.  %% Scale only by a constant
+
+-type lms_select() :: off | on | breathe | bright_no_scale.
 
 %% SIL = system indicator light
--record(lms_dwell, { 
-	  mid_to_start_ratio :: uint16(),
-	  mid_to_end_ratio   :: uint16(),
-	  start_ticks        :: uint16(),
-	  end_ticks          :: uint16()
-	}).
+
 
 %% "{ala"
 -record(als_lux_line, {
-	  m :: uint16(), %% Slope of line.
-	  b :: int16(),  %% Y-Intercept of line.
-	  r :: uint16()  %% Region
-	 }).
+	m :: uint16(), %% Slope of line.
+	b :: int16(),  %% Y-Intercept of line.
+	r :: uint16()  %% Region
+	}).
 
 %% "{alc"
 -record(als_config, { 
@@ -51,34 +53,34 @@
 %% "{ali"
 -record(als_sensor, {
 	  type :: alstype(),   %% Type of sensor.
-	  valid_when_lid_closed :: flag(), 
+	  valid_when_lid_closed :: flag_t(), 
 	  %% TRUE if no lid or if sensor works with
 	  %% closed lid.  FALSE otherwise.
-	  control_sil :: flag()
+	  control_sil :: flag_t()
 	  %% TRUE if the SIL brightness depends on
 	  %% this sensor's value.  FALSE otherwise.
 	 }).
 
 %% "{alr" - ALS analog lux temperature coefficients.
 -record(als_therm, {
-	 tempbase :: int16(),   %% Temperature baseline (deg C, FP16.0)
-	 tempcoefv :: uint16(), %% Temperature coeff (ADC Counts/deg C, FP12.4)
-	 tempinflv :: uint16(), %% Thermal compensation inflection point voltage
+	  base :: int16(),   %% Temperature baseline (deg C, FP16.0)
+	  coefv :: uint16(), %% Temperature coeff (ADC Counts/deg C, FP12.4)
+	  inflv :: uint16(), %% Thermal compensation inflection point voltage
 	                        %%   (ADCCounts, FP16.0)
-	 templow :: int16(),    %% Low temperature boundary (deg C, FP16.0)
-	 temphigh :: int16()    %% High temperature boundary (deg C, FP16.0)
+	  low :: int16(),    %% Low temperature boundary (deg C, FP16.0)
+	  high :: int16()    %% High temperature boundary (deg C, FP16.0)
 	}).
 
 %% "{alt" ALS analog lux calculation thresholds.
--record(als_luxthrsh, {
-	  thrsh_low :: uint16(),  %% ADC threshold while in low gain.
-	  thrsh_high :: uint16() %% ADC threshold while in high gain.
+-record(als_lux_thresh, {
+	  low :: uint16(),  %% ADC threshold while in low gain.
+	  high :: uint16() %% ADC threshold while in high gain.
 	 }).
 
 %% "{alv" ALSValue structure contains latest ambient light info from 1 sensor
 -record(als_value, {
-	  valid :: flag(),         %% If TRUE, data in this struct is valid.
-	  high_gain :: flag(),     %% If TRUE, ui16Chan0/1 are high-gain
+	  valid :: flag_t(),         %% If TRUE, data in this struct is valid.
+	  high_gain :: flag_t(),     %% If TRUE, ui16Chan0/1 are high-gain
 	                           %% readings.  If FALSE, ui16Chan0/1 are
                                    %% low-gain readings.
 	  chan0 :: uint16(),       %% I2C channel 0 data or analog(ADC) data.
@@ -109,5 +111,66 @@
 	  func :: list()    %% [DIAG_FUNCTION_STR_LEN]
 	 }).
 
+%% "{lim"
+-record(plimits, {
+	cpu :: uint8(),
+	gpu :: uint8(),
+	mem :: uint8()
+	}).
+	
+%% "{lsc"
+-record(lms_config, {
+	modv_max_change_per_tick :: pwm_t(), %% Max PWM change per 1/152 sec
+	modv_brightness_breathe_min :: pwm_t(),     %% Breathe dwell PWM setting
+        scale_constant :: uint16(),         %% Scale constant (1.15 fixed-point
+                                          %% representation) if not using
+                                          %%   ALS or TOD scaling
+  scale_mode :: scale_mode(),      %% Scale by ALS, TOD, or constant
+  ramp_duration :: uint8(),           %% Ramp length (equals 152 *
+                                          %%   ramp time in seconds)
+  power_switch_overrides_sil :: flag_t(),    %% TRUE if pressing the power
+                                          %%   switch should force the
+                                          %%   SIL to full brightness
+  min_ticks_to_target :: uint8()        %% Slow the slew rate so that
+                                         %%   it takes at least this many
+                                         %%   ticks to reach the target
+                                         %%   from the prev PWM value.
+}).
+
+%% "{lsd"
+-record(lms_dwell, { 
+	  mid_to_start_ratio :: uint16(),
+	  mid_to_end_ratio   :: uint16(),
+	  start_ticks        :: uint16(),
+	  end_ticks          :: uint16()
+	}).
+
+%% "{lsf
+-record(lms_flare, {
+	%% Flare algorithm is active below this value.
+	modv_flare_ceiling :: pwm_t(),  
+        modv_min_change :: pwm_t(),  %% Minimum rate of change while flaring.
+	flare_adjust :: uint16()    %% Smaller value causes stronger flare as
+                                   %% PWM value descends below modvFlareCeiling.
+	}).
+
+%% "{lsm"  scale_mode() !
+
+%% "{lso"
+-record(lms_override_behavior, {
+	target_behavior :: lms_select(),
+	ramp :: flag_t()
+	}).
+			   
+
+%% special coding of ch8* ACID
+-record(adapter_info, {
+	family,
+	serial,     %% serial number
+	revision,
+	power,      %% watts
+	id,
+	crc
+	}).
 
 -endif.

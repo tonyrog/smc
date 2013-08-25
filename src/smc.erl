@@ -27,16 +27,18 @@
 -export([read_index/1]).
 -export([read_info/1]).
 -export([read_bytes/2]).
+-export([write_bytes/2]).
 
 -export([read_all/0]).
 -export([read_motion/0]).
 -export([read_fans/0]).
 -export([read_fan/1]).
 -export([read_temp/0]).
+-export([set_backlight/1]).
 
 -export([i/0]).
 -export([foldl/2, foldr/2]).
--export([decode_data/2]).
+-export([decode/2, decode/3]).
 
 -export([io_call/2]).  %% lowest-level
 -export([debug/1]).
@@ -75,6 +77,7 @@
 
 -define(SMC_CMD_READ_BYTES,    5).
 -define(SMC_CMD_WRITE_BYTES,   6).
+-define(SMC_CMD_READ_KEY_COUNT,7). %% count of what?
 -define(SMC_CMD_READ_INDEX,    8).
 -define(SMC_CMD_READ_KEYINFO,  9).
 -define(SMC_CMD_READ_PLIMIT,   11).
@@ -164,13 +167,39 @@ read_bytes(Key=(<<K0,K1,K2,K3>>), Size) when is_integer(Size), Size >= 0 ->
 	    Error
     end.
 
+write_bytes(_Key=(<<K0,K1,K2,K3>>), Data) when is_binary(Data), 
+					       byte_size(Data) =< 32 ->
+    RKey = <<K3,K2,K1,K0>>,
+    Size = byte_size(Data),
+    Pad  = 32 - Size,
+    Cmd = ?SMCKeyData(RKey, <<0:6/unit:8>>, <<0:16/unit:8>>, 0,
+		      Size, <<0:4/unit:8>>,0,0,
+		      0,0,?SMC_CMD_WRITE_BYTES,0,0,
+		      <<Data/binary,0:Pad/unit:8>>),
+    ?dbg("Cmd = ~p\n", [Cmd]),
+    ReplySize = byte_size(Cmd),
+    ?dbg("ReplySize = ~w\n", [ReplySize]),
+    case io_call(Cmd,ReplySize) of
+	{ok,_Rep=?SMCKeyData(_,_,_,_Pad0,
+			     _Size,_Type,_Attrib,_Pad1,
+			     _Result,_Status,_Data8,_Pad2,_Data32,
+			     _Bytes)} ->
+	    ?dbg("Rep = ~p\n", [_Rep]),
+	    ok;
+	Error ->
+	    Error
+    end.
+
+%% set backlight pwm value (only works as super user!)
+set_backlight(Value) ->
+    write_bytes(<<"LKSB">>, <<Value:16>>).
 
 read_key(Key) ->
     case read_info(Key) of
 	{ok,{Key,Type,Size}} ->
 	    case read_bytes(Key,Size) of
 		{ok,{Key,Data}} ->
-		    Value = decode_data(Type,Data),
+		    Value = decode(Type,Key,Data),
 		    {ok,{Key,Type,Value}};
 		Error ->
 		    Error
@@ -281,8 +310,7 @@ read_temp() ->
        %% {<<"Ts0P">>,<<"sp78">>,31.0625}
        %% {<<"Ts0S">>,<<"sp78">>,40.44140625}
        ]).
-       
-       
+
 %% sp78 with some special values
 opt_read_temp_key(Key, Name) ->
     case read_bytes(Key, 2) of
@@ -303,40 +331,76 @@ opt_read_key(Key, Name) ->
 	_ -> []
     end.
 
+decode(Type, Value) ->
+    decode(Type, <<0,0,0,0>>, Value).
 
-decode_data(<<"ui8 ">>, <<Val:8/unsigned>>) -> Val;
-decode_data(<<"ui8",0>>, Val) -> Val;  %% bug?
-decode_data(<<"ui16">>, <<Val:16/unsigned>>) -> Val;
-decode_data(<<"ui32">>, <<Val:32/unsigned>>) -> Val;
-decode_data(<<"si8 ">>, <<Val:8/signed>>) -> Val;
-decode_data(<<"si16">>, <<Val:16/signed>>) -> Val;
-decode_data(<<"{pwm">>, <<Val:16/unsigned>>) -> Val;
-decode_data(<<"flag">>, <<Val:8/unsigned>>) -> Val;
-decode_data(<<"char">>, <<Val:8/signed>>) -> Val;
-decode_data(<<"fp1f">>,<<Val:16>>) -> Val/32768.0;
-decode_data(<<"fp2e">>,<<Val:16>>) -> Val/16384.0;
-decode_data(<<"fp3d">>,<<Val:16>>) -> Val/8192.0;
-decode_data(<<"fp4c">>,<<Val:16>>) -> Val/4096.0;
-decode_data(<<"fp5b">>,<<Val:16>>) -> Val/2048.0;
-decode_data(<<"fp6a">>,<<Val:16>>) -> Val/1024.0;
-decode_data(<<"fp79">>,<<Val:16>>) -> Val/512.0;
-decode_data(<<"fp88">>,<<Val:16>>) -> Val/256.0;
-decode_data(<<"fp97">>,<<Val:16>>) -> Val/128.0;
-decode_data(<<"fpa6">>,<<Val:16>>) -> Val/64.0;
-decode_data(<<"fpb5">>,<<Val:16>>) -> Val/32.0;
-decode_data(<<"fpc4">>,<<Val:16>>) -> Val/16.0;
-decode_data(<<"fpd3">>,<<Val:16>>) -> Val/8.0;
-decode_data(<<"fpe2">>,<<Val:16>>) -> Val/4.0;
-decode_data(<<"fpf1">>,<<Val:16>>) -> Val/2.0;
-decode_data(<<"sp78">>, <<Val:16/signed>>) -> Val / 256.0;
-decode_data(<<"ch8*">>, Val) -> Val;
+decode(<<"ui8 ">>, _Key, <<Val:8/unsigned>>) -> Val;
+decode(<<"ui8",0>>, _Key, Val) -> Val;  %% bug?
+decode(<<"ui16">>, _Key, <<Val:16/unsigned>>) -> Val;
+decode(<<"ui32">>, _Key, <<Val:32/unsigned>>) -> Val;
+decode(<<"si8 ">>, _Key, <<Val:8/signed>>) -> Val;
+decode(<<"si16">>, _Key, <<Val:16/signed>>) -> Val;
+decode(<<"{pwm">>, _Key, <<Val:16/unsigned>>) -> Val;
+decode(<<"flag">>, _Key, <<Val:8/unsigned>>) -> Val;
+decode(<<"char">>, _Key, <<Val:8/signed>>) -> Val;
+decode(<<"fp1f">>, _Key, <<Val:16>>) -> Val/32768.0;
+decode(<<"fp2e">>, _Key, <<Val:16>>) -> Val/16384.0;
+decode(<<"fp3d">>, _Key, <<Val:16>>) -> Val/8192.0;
+decode(<<"fp4c">>, _Key, <<Val:16>>) -> Val/4096.0;
+decode(<<"fp5b">>, _Key, <<Val:16>>) -> Val/2048.0;
+decode(<<"fp6a">>, _Key, <<Val:16>>) -> Val/1024.0;
+decode(<<"fp79">>, _Key, <<Val:16>>) -> Val/512.0;
+decode(<<"fp88">>, _Key, <<Val:16>>) -> Val/256.0;
+decode(<<"fp97">>, _Key, <<Val:16>>) -> Val/128.0;
+decode(<<"fpa6">>, _Key, <<Val:16>>) -> Val/64.0;
+decode(<<"fpb5">>, _Key, <<Val:16>>) -> Val/32.0;
+decode(<<"fpc4">>, _Key, <<Val:16>>) -> Val/16.0;
+decode(<<"fpd3">>, _Key, <<Val:16>>) -> Val/8.0;
+decode(<<"fpe2">>, _Key, <<Val:16>>) -> Val/4.0;
+decode(<<"fpf1">>, _Key, <<Val:16>>) -> Val/2.0;
+decode(<<"sp78">>, _Key, <<Val:16/signed>>) -> Val / 256.0;
 
-decode_data(<<"{lsd">>, <<MS:16,ME:16,ST:16,ET:16>>) ->
+%% ACID - AC adapter id is provided as little enidan
+%% #define kACCRCBit       56   // size 8
+%% #define kACIDBit        44  // size 12
+%% #define kACPowerBit     36  // size 8
+%% #define kACRevisionBit  32  // size 4
+%% #define kACSerialBit    8   // size 24
+%% #define kACFamilyBit    0   // size 8
+%% <<Family:8,Serial:24,Rev:4,Power:8,ID:12,CRC:8>>) ->
+decode(<<"ch8*">>, <<"ACID">>,  <<Bits:64/little>>) ->
+    Family = (Bits bsr 0) band 16#ff,
+    Serial  = (Bits bsr 8) band 16#ffffff,
+    Revision = (Bits bsr 32) band 16#f,
+    Power = (Bits bsr 36) band 16#ff,
+    ID = (Bits bsr 44) band 16#fff,
+    CRC = (Bits bsr 56) band 16#ff,
+    #adapter_info { family = Family, serial = Serial, revision = Revision,
+		    power = Power, id = ID, crc=CRC };
+decode(<<"ch8*">>, _Key, Val) -> Val;
+
+decode(<<"{lsc">>, _Key, <<ModChange:16,ModBright:16,ScaleConst:16,
+			   ScaleMod:8, RampDur:8,PowerSw:8,MinTicks:8>>) ->
+    ScaleMode = decode_scale_mode(ScaleMod),
+    #lms_config { modv_max_change_per_tick = ModChange,
+		  modv_brightness_breathe_min = ModBright,
+		  scale_constant = ScaleConst,
+		  scale_mode = ScaleMode,
+		  ramp_duration = RampDur,
+		  power_switch_overrides_sil = PowerSw,
+		  min_ticks_to_target = MinTicks };
+
+decode(<<"{lsd">>, _Key, <<MS:16,ME:16,ST:16,ET:16>>) ->
     #lms_dwell { mid_to_start_ratio = MS,
 		 mid_to_end_ratio = ME,
 		 start_ticks = ST,
 		 end_ticks = ET };
-decode_data(<<"{fds">>, <<Typ,Zone,Loc,_Pad:8,Func/binary>>) ->
+decode(<<"{lsf">>, _Key, <<Ceil:16,Change:16,Adjust:16>>) ->
+    #lms_flare { modv_flare_ceiling = Ceil,
+		 modv_min_change = Change,
+		 flare_adjust = Adjust };
+
+decode(<<"{fds">>, _Key, <<Typ,Zone,Loc,_Pad:8,Func/binary>>) ->
     LocTab = 
 	{'LEFT_LOWER_FRONT','CENTER_LOWER_FRONT','RIGHT_LOWER_FRONT',
 	 'LEFT_MID_FRONT'  ,'CENTER_MID_FRONT'  , 'RIGHT_MID_FRONT'     ,
@@ -362,21 +426,17 @@ decode_data(<<"{fds">>, <<Typ,Zone,Loc,_Pad:8,Func/binary>>) ->
        location = Location,
        func = decode_string(Func) };
 
-decode_data(<<"{ala">>, <<M:16,B:16/signed,R:16>>) ->
+decode(<<"{ala">>, _Key, <<M:16,B:16/signed,R:16>>) ->
     #als_lux_line { m=M, b=B, r=R };
 
-decode_data(<<"{alv">>,<<Valid:8,HighGain:8,Chan0:16,Chan1:16,RoomLux:32>>) ->
-    #als_value { valid = Valid, high_gain = HighGain,
-		 chan0 = Chan0, chan1 = Chan1,
-		 room_lux = RoomLux / 16384.0 };
 
-decode_data(<<"{alc">>,<<I2CTime:16,AdcTime:16,LMax:16,LMin:16,
+decode(<<"{alc">>, _Key, <<I2CTime:16,AdcTime:16,LMax:16,LMin:16,
 			 ELow:16,EHigh:16,Reflect:16,Sensors:8,LidDelay:8>>) ->
     #als_config { i2c_time = I2CTime, adc_time = AdcTime,
 		  lmax = LMax, lmin = LMin,  elow = ELow, ehigh = EHigh,
 		  reflect = Reflect, sensors = Sensors, lid_delay = LidDelay };
 
-decode_data(<<"{ali">>,<<Typ:8, ValidWhenLidClosed:8, ControlSil:8,_:8>>) ->
+decode(<<"{ali">>, _Key, <<Typ:8, ValidWhenLidClosed:8, ControlSil:8,_:8>>) ->
     Type = try element(Typ+1, { 'NoSensor', 'BS520', 'TSL2561CS', 
 				'LX1973A', 'ISL29003' }) of
 	       T -> T
@@ -385,12 +445,55 @@ decode_data(<<"{ali">>,<<Typ:8, ValidWhenLidClosed:8, ControlSil:8,_:8>>) ->
 	   end,
     #als_sensor { type = Type, valid_when_lid_closed = ValidWhenLidClosed,
 		  control_sil = ControlSil };
-    
-decode_data(_, Val) -> {raw,Val}.
+decode(<<"{alr">>, _Key, <<Base:16/signed, Coefv:16, Inflv:16,
+			   Low:16/signed, High:16/signed>>) ->
+    #als_therm { base = Base, coefv = Coefv, inflv = Inflv,
+		 low = Low, high = High };
+decode(<<"{alt">>, _Key, <<Low:16, High:16>>) ->
+    #als_lux_thresh { low = Low, high = High };
 
+decode(<<"{alv">>, _Key, <<Valid:8,HighGain:8,Chan0:16,Chan1:16,RoomLux:32>>) ->
+    #als_value { valid = Valid, high_gain = HighGain,
+		 chan0 = Chan0, chan1 = Chan1,
+		 room_lux = RoomLux / 16384.0 };
+
+decode(<<"{lim">>, _Key, <<Cpu,Gpu,Mem>>) ->
+    #plimits { cpu = Cpu,
+	       gpu = Gpu,
+	       mem = Mem };
+decode(<<"{lsm">>, _Key, <<ScaleMod>>) ->
+    decode_scale_mode(ScaleMod);
+
+decode(<<"{lso">>, _Key, <<Select,Ramp>>) ->
+    #lms_override_behavior {
+       target_behavior = decode_lms_select(Select),
+       ramp = decode_flag(Ramp)
+      };
+decode(<<"{lss">>, _Key, <<Sel>>) ->
+    decode_lms_select(Sel);
+
+decode(_, _Key, Val) -> {raw,Val}.
+
+
+decode_flag(0) -> false;
+decode_flag(_) -> true.
 
 decode_string(Bin) when is_binary(Bin) ->
     trim_string_(binary_to_list(Bin)).
+
+decode_scale_mode(ScaleMod) ->
+    try element(ScaleMod+1, { scale_als, scale_tod, scale_const }) of
+	S -> S
+    catch
+	_ -> ScaleMod
+    end.
+
+decode_lms_select(Sel) ->
+    try element(Sel+1, { off, on, breathe, bright_no_scale }) of
+	S -> S
+    catch
+	_ -> Sel
+    end.
 
 trim_string_(Cs) ->
     trim_(reverse(trim_(reverse(Cs)))).
