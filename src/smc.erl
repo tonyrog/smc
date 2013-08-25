@@ -29,7 +29,7 @@
 -export([read_bytes/2]).
 
 -export([read_all/0]).
--export([read_orientation/0]).
+-export([read_motion/0]).
 -export([read_fans/0]).
 -export([read_fan/1]).
 -export([read_temp/0]).
@@ -207,12 +207,15 @@ foldr(Fun, Acc) ->
 	      Fun({I,K,Type,Value},Acci)
       end, Acc, lists:seq(N-1,0,-1)).
 
-
-read_orientation() ->
+%%
+%% read_motion can be used for orientaion as well!
+%%
+read_motion() ->
     %% 250.5! 
     {ok,{_,<<X:16/signed>>}} = read_bytes(<<"MO_X">>, 2),
     {ok,{_,<<Y:16/signed>>}} = read_bytes(<<"MO_Y">>, 2),
-    {X/250.5,Y/250.5}.
+    {ok,{_,<<Z:16/signed>>}} = read_bytes(<<"MO_Z">>, 2),
+    {X/250.5,Y/250.5,Z/250.5}.
 
 read_fans() ->
     {ok,{_,_,Mode}} = read_key(<<"FS! ">>),
@@ -366,6 +369,23 @@ decode_data(<<"{alv">>,<<Valid:8,HighGain:8,Chan0:16,Chan1:16,RoomLux:32>>) ->
     #als_value { valid = Valid, high_gain = HighGain,
 		 chan0 = Chan0, chan1 = Chan1,
 		 room_lux = RoomLux / 16384.0 };
+
+decode_data(<<"{alc">>,<<I2CTime:16,AdcTime:16,LMax:16,LMin:16,
+			 ELow:16,EHigh:16,Reflect:16,Sensors:8,LidDelay:8>>) ->
+    #als_config { i2c_time = I2CTime, adc_time = AdcTime,
+		  lmax = LMax, lmin = LMin,  elow = ELow, ehigh = EHigh,
+		  reflect = Reflect, sensors = Sensors, lid_delay = LidDelay };
+
+decode_data(<<"{ali">>,<<Typ:8, ValidWhenLidClosed:8, ControlSil:8,_:8>>) ->
+    Type = try element(Typ+1, { 'NoSensor', 'BS520', 'TSL2561CS', 
+				'LX1973A', 'ISL29003' }) of
+	       T -> T
+	   catch
+	       _ -> Typ
+	   end,
+    #als_sensor { type = Type, valid_when_lid_closed = ValidWhenLidClosed,
+		  control_sil = ControlSil };
+    
 decode_data(_, Val) -> {raw,Val}.
 
 

@@ -33,15 +33,15 @@
 
 %% "{alc"
 -record(als_config, { 
-	  i2ctime :: uint16(),   %% Int interval (ms) for ALS I2C task.
-	  adctime :: uint16(),   %% Int interval (ms) for ALS ADC ISR.
+	  i2c_time :: uint16(),  %% Int interval (ms) for ALS I2C task.
+	  adc_time :: uint16(),  %% Int interval (ms) for ALS ADC ISR.
 	  lmax :: uint16(),      %% Maximum cd/m^2 for SIL.
 	  lmin :: uint16(),      %% Minimum cd/m^2 for SIL.
 	  elow :: uint16(),      %% Low room illum threshold (lux).
 	  ehigh :: uint16(),     %% High room illum threshold (lux).
 	  reflect :: uint16(),   %% Bezel reflection coefficient.
-	  alssensors :: uint8(), %% Actual number of ALS sensors in system.
-	  liddelay :: uint8()    %% Delay after lid opens (in tenths of seconds)
+	  sensors :: uint8(),    %% Actual number of ALS sensors in system.
+	  lid_delay :: uint8()   %% Delay after lid opens (in tenths of seconds)
 	                         %% during which ALS readings don't affect the 
 	                         %%   SIL.
 	 }).
