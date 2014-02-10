@@ -1,5 +1,5 @@
 //
-// smc_drv.c   SMC linux / erlang driver
+// smc_drv.c   SMC darwin / erlang driver
 //
 //
 

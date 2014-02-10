@@ -274,8 +274,7 @@ read_fan_(I, Mode) ->
        end]).
 
 read_temp() ->    
-    lists:append(
-      [opt_read_temp_key(<<"TB0T">>, cpu_heatsink1),
+    lists:append([
        opt_read_temp_key(<<"TG0T">>, gpu_heatsink1),
        opt_read_temp_key(<<"TH0P">>, hdd_proximity),
        opt_read_temp_key(<<"TO0P">>, odd_proximity),
